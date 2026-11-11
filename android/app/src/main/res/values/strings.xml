@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Підсвітка</string>
+    <color name="ic_background">#0B0C10</color>
+</resources>
