@@ -72,12 +72,21 @@ object Saved {
         prefs(ctx).edit().putString("templates", text).apply()
     }
 
-    /** Захист від надто частих фонових перевірок. */
-    fun claimBackgroundCheck(ctx: Context, minIntervalMs: Long): Boolean {
+    /**
+     * Чи контролер щойно з'явився після перерви (машину завели), а не просто знову помічений в ефірі.
+     * Поки машина працює, Android бачить контролер постійно, і перевіряти щоразу не треба:
+     * часті підключення самі збивають дешеві контролери.
+     */
+    fun appearedAfterGap(ctx: Context, gapMs: Long): Boolean {
         val p = prefs(ctx)
         val now = System.currentTimeMillis()
-        if (now - p.getLong("lastCheck", 0) < minIntervalMs) return false
-        p.edit().putLong("lastCheck", now).apply()
-        return true
+        val last = p.getLong("lastSeen", 0)
+        p.edit().putLong("lastSeen", now).apply()
+        return now - last >= gapMs
+    }
+
+    /** Поки ми підключені, контролер мовчить в ефірі, тож після з'єднання вважаємо, що бачили його щойно. */
+    fun markSeen(ctx: Context) {
+        prefs(ctx).edit().putLong("lastSeen", System.currentTimeMillis()).apply()
     }
 }

@@ -27,7 +27,17 @@ import kotlinx.coroutines.delay
 object AutoRestore {
     private const val WORK = "restore"
 
+    /**
+     * Скільки контролер має мовчати, щоб його появу вважати запуском машини. Поки він живий,
+     * Android бачить його кожні кілька секунд, тож хвилини вистачає й на коротку зупинку біля магазину.
+     */
+    const val ABSENCE_MS = 60_000L
+
+    // Перереєстрація сканування зайвий раз з'їдає ліміт Android (5 запусків за 30 с).
+    @Volatile private var registered = false
+
     fun register(ctx: Context) {
+        if (registered) return
         // На Android 11 і старіших фонове сканування вимагає дозволу на геолокацію у фоні — там не вмикаємо.
         if (Build.VERSION.SDK_INT < 31) return
         if (ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) return
@@ -41,7 +51,12 @@ object AutoRestore {
         runCatching { scanner.stopScan(intent) }
         val filter = ScanFilter.Builder().setDeviceAddress(LedProtocol.ADDRESS).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build()
-        scanner.startScan(listOf(filter), settings, intent)
+        registered = scanner.startScan(listOf(filter), settings, intent) == 0
+    }
+
+    /** Екран відкрили — фонова перевірка не повинна змагатися з ним за єдине з'єднання. */
+    fun cancel(ctx: Context) {
+        WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
     }
 
     private fun pendingIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
@@ -56,12 +71,15 @@ object AutoRestore {
     }
 }
 
-/** Android будить його, щойно бачить контролер. Поки машина працює — не частіше разу на хвилину. */
+/**
+ * Android будить його щоразу, як бачить контролер. Перевіряємо лише тоді, коли контролера
+ * не було в ефірі кілька хвилин, тобто машину справді щойно завели.
+ */
 class ScanReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.hasExtra("android.bluetooth.le.extra.ERROR_CODE")) return
+        if (!Saved.appearedAfterGap(ctx, AutoRestore.ABSENCE_MS)) return
         if (MainActivity.isVisible) return // екран відкритий — він і так тримає з'єднання
-        if (!Saved.claimBackgroundCheck(ctx, 60_000)) return
         AutoRestore.schedule(ctx)
     }
 }

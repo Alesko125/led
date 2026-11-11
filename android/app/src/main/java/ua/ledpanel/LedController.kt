@@ -35,7 +35,7 @@ class LedController(private val ctx: Context, private val scope: CoroutineScope)
                     val light = pending ?: break
                     pending = null
                     conn?.show(light)
-                    delay(40)
+                    delay(120) // ~8 команд на секунду: плавно для ока і посильно для контролера
                 }
             }
         }
@@ -59,6 +59,7 @@ class LedController(private val ctx: Context, private val scope: CoroutineScope)
     }
 
     private suspend fun runLoop() {
+        var failures = 0
         while (true) {
             if (ctx.bluetoothAdapter()?.isEnabled != true) {
                 _status.value = Status.BluetoothOff
@@ -71,9 +72,12 @@ class LedController(private val ctx: Context, private val scope: CoroutineScope)
             _status.value = Status.Connecting
             val c = LedConnection(ctx)
             if (!c.connect(device)) {
-                delay(1_000)
+                // Наростаюча пауза: Android мовчки глушить сканування, якщо їх більше 5 за 30 с.
+                failures++
+                delay(minOf(1_000L shl minOf(failures - 1, 4), 10_000L))
                 continue
             }
+            failures = 0
             conn = c
             _connectedLight.value = c.restoreSaved(ctx)
             _status.value = Status.Connected

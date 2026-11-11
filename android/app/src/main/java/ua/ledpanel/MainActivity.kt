@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         isVisible = true
+        AutoRestore.cancel(applicationContext)
         onAccessChanged()
         if (!hasPermissions && !askedPermissions) requestAccess()
     }

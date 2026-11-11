@@ -70,15 +70,21 @@ class LedConnection(private val ctx: Context) {
     val disconnected = CompletableDeferred<Unit>()
 
     suspend fun connect(device: BluetoothDevice): Boolean {
-        val ok = withTimeoutOrNull(15_000) {
-            step {
-                gatt = device.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE)
-                gatt != null
-            } && step { gatt!!.requestMtu(247) } &&
-                step { gatt!!.discoverServices() } &&
-                enableNotifications()
-        } ?: false
-        if (!ok) close()
+        var ok = false
+        try {
+            ok = withTimeoutOrNull(15_000) {
+                step {
+                    gatt = device.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE)
+                    gatt != null
+                } && step { gatt!!.requestMtu(247) } &&
+                    step { gatt!!.discoverServices() } &&
+                    enableNotifications()
+            } ?: false
+        } finally {
+            // І при скасуванні (екран закрили посеред підключення): інакше з'єднання висить відкритим,
+            // контролер зайнятий і зникає з ефіру до перезапуску застосунку.
+            if (!ok) close()
+        }
         return ok
     }
 
@@ -127,12 +133,21 @@ class LedConnection(private val ctx: Context) {
     suspend fun readState(): LedProtocol.State? {
         val reply = CompletableDeferred<LedProtocol.State>().also { stateReply = it }
         if (!send(LedProtocol.stateQuery(), expectsReply = true)) return null
-        return withTimeoutOrNull(3_000) { reply.await() }
+        return withTimeoutOrNull(3_000) { reply.await() }?.also { powerSent = it.on }
     }
 
-    /** Виставляє вибраний стан. Після команди контролеру треба мить на плавний перехід. */
+    // Яке живлення контролер уже отримав у цьому з'єднанні; null — невідомо.
+    @Volatile private var powerSent: Boolean? = null
+
+    /**
+     * Виставляє вибраний стан. Команду живлення шлемо лише тоді, коли вона щось змінює:
+     * раніше вона йшла з кожним рухом повзунка, і контролер захлинався пакетами.
+     */
     suspend fun show(light: Light) {
-        send(LedProtocol.power(light.on))
+        if (powerSent != light.on) {
+            powerSent = if (send(LedProtocol.power(light.on))) light.on else null
+            if (light.on) delay(100) // контролер не встигає прийняти колір одразу за увімкненням
+        }
         if (light.on) send(LedProtocol.color(light.rgbw()))
     }
 
@@ -143,6 +158,7 @@ class LedConnection(private val ctx: Context) {
         }
         gatt = null
         pendingOp?.complete(false)
+        if (!disconnected.isCompleted) Saved.markSeen(ctx)
         disconnected.complete(Unit)
     }
 
@@ -160,6 +176,7 @@ class LedConnection(private val ctx: Context) {
                 pendingOp?.complete(false)
                 g.close()
                 gatt = null
+                if (!disconnected.isCompleted) Saved.markSeen(ctx)
                 disconnected.complete(Unit)
             }
         }
