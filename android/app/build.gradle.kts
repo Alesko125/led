@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -13,8 +15,28 @@ android {
         applicationId = "ua.ledpanel"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        // Тег релізу на GitHub — v<versionCode>: за ним застосунок і знаходить оновлення.
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // Підпис тим самим ключем, що й у встановленого застосунку, інакше оновлення не стане поверх.
+    val keystore = rootProject.file("keystore.properties")
+    signingConfigs {
+        if (keystore.exists()) {
+            create("release") {
+                val p = Properties().apply { keystore.inputStream().use { load(it) } }
+                storeFile = file(p.getProperty("storeFile"))
+                storePassword = p.getProperty("storePassword")
+                keyAlias = p.getProperty("keyAlias")
+                keyPassword = p.getProperty("keyPassword")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
 
     compileOptions {

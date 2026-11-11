@@ -81,7 +81,8 @@ object Saved {
         val p = prefs(ctx)
         val now = System.currentTimeMillis()
         val last = p.getLong("lastSeen", 0)
-        p.edit().putLong("lastSeen", now).apply()
+        // Оголошення приходять кожні кілька секунд — на диск пишемо не частіше ніж раз на 10 с.
+        if (now - last > 10_000) p.edit().putLong("lastSeen", now).apply()
         return now - last >= gapMs
     }
 

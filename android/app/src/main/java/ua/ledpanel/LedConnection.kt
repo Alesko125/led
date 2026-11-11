@@ -136,16 +136,20 @@ class LedConnection(private val ctx: Context) {
         return withTimeoutOrNull(3_000) { reply.await() }?.also { powerSent = it.on }
     }
 
-    // Яке живлення контролер уже отримав у цьому з'єднанні; null — невідомо.
+    // Яке живлення контролер уже отримав у цьому з'єднанні (null — невідомо) і коли.
     @Volatile private var powerSent: Boolean? = null
+    @Volatile private var powerSentAt = 0L
 
     /**
-     * Виставляє вибраний стан. Команду живлення шлемо лише тоді, коли вона щось змінює:
-     * раніше вона йшла з кожним рухом повзунка, і контролер захлинався пакетами.
+     * Виставляє вибраний стан. Команду живлення шлемо, коли вона щось змінює, і для певності
+     * не частіше разу на 2 с: запис без відповіді може загубитись, а контролер могли вимкнути пультом.
+     * Раніше вона йшла з кожним рухом повзунка, і контролер захлинався пакетами.
      */
     suspend fun show(light: Light) {
-        if (powerSent != light.on) {
+        val now = System.currentTimeMillis()
+        if (powerSent != light.on || now - powerSentAt > 2_000) {
             powerSent = if (send(LedProtocol.power(light.on))) light.on else null
+            powerSentAt = now
             if (light.on) delay(100) // контролер не встигає прийняти колір одразу за увімкненням
         }
         if (light.on) send(LedProtocol.color(light.rgbw()))

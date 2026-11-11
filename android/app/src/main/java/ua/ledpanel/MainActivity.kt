@@ -41,7 +41,14 @@ class MainActivity : ComponentActivity() {
         }
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { onAccessChanged() }
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            onAccessChanged()
+            if (hasPermissions) askNotifications()
+        }
+    private var askedNotifications = false
+
+    private val notificationsLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private val enableBluetooth =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { onAccessChanged() }
@@ -52,6 +59,7 @@ class MainActivity : ComponentActivity() {
         Saved.light(this)?.let { light = it }
         templates = Saved.templates(this)
         controller = LedController(applicationContext, lifecycleScope)
+        AutoUpdate.schedule(applicationContext)
         lifecycleScope.launch {
             controller.connectedLight.filterNotNull().collect { light = it }
         }
@@ -82,14 +90,27 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         isVisible = true
         AutoRestore.cancel(applicationContext)
+        AutoUpdate.checkNow(applicationContext) // поки екран відкритий — лише завантажує
         onAccessChanged()
-        if (!hasPermissions && !askedPermissions) requestAccess()
+        if (!hasPermissions && !askedPermissions) requestAccess() else if (hasPermissions) askNotifications()
     }
 
     override fun onStop() {
         super.onStop()
         isVisible = false
         controller.stop() // звільняємо контролер для фонових перевірок
+        AutoUpdate.checkNow(applicationContext) // екран закрили — тепер можна ставити оновлення
+    }
+
+    /**
+     * Сповіщення про оновлення просимо лише після Bluetooth: два запити дозволів одночасно
+     * Android не показує, і людина лишилась би без діалогу Bluetooth.
+     */
+    private fun askNotifications() {
+        if (Build.VERSION.SDK_INT < 33 || askedNotifications) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        askedNotifications = true
+        notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun requestAccess() {

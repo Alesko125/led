@@ -33,11 +33,12 @@ object AutoRestore {
      */
     const val ABSENCE_MS = 60_000L
 
-    // Перереєстрація сканування зайвий раз з'їдає ліміт Android (5 запусків за 30 с).
-    @Volatile private var registered = false
+    // Перереєстрація сканування з'їдає ліміт Android (5 запусків за 30 с), тож не частіше разу на хвилину.
+    // Саме час, а не прапорець: після вимкнення Bluetooth скан зупиняється, і його треба поставити знову.
+    @Volatile private var registeredAt = 0L
 
     fun register(ctx: Context) {
-        if (registered) return
+        if (System.currentTimeMillis() - registeredAt < 60_000) return
         // На Android 11 і старіших фонове сканування вимагає дозволу на геолокацію у фоні — там не вмикаємо.
         if (Build.VERSION.SDK_INT < 31) return
         if (ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) return
@@ -51,7 +52,7 @@ object AutoRestore {
         runCatching { scanner.stopScan(intent) }
         val filter = ScanFilter.Builder().setDeviceAddress(LedProtocol.ADDRESS).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build()
-        registered = scanner.startScan(listOf(filter), settings, intent) == 0
+        if (scanner.startScan(listOf(filter), settings, intent) == 0) registeredAt = System.currentTimeMillis()
     }
 
     /** Екран відкрили — фонова перевірка не повинна змагатися з ним за єдине з'єднання. */
@@ -84,10 +85,13 @@ class ScanReceiver : BroadcastReceiver() {
     }
 }
 
-/** Після перезавантаження телефона стеження треба ввімкнути знову. */
+/** Після перезавантаження телефона чи оновлення застосунку стеження треба ввімкнути знову. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) AutoRestore.register(ctx)
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            AutoRestore.register(ctx)
+            AutoUpdate.schedule(ctx)
+        }
     }
 }
 
